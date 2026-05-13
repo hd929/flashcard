@@ -7,6 +7,7 @@ const state = {
   activeView: 'home',
   isLoading: false,
   studyMode: 'flip', // 'flip' or 'type'
+  sessionType: 'learning', // 'learning' or 'reviewing'
   userInput: '',
   feedback: '' // 'correct', 'incorrect', ''
 };
@@ -60,7 +61,6 @@ const api = {
     }
 
     try {
-      // 0. Check local/DB cache first
       const cacheRes = await fetch(`/api/cards?term=${encodeURIComponent(word)}`);
       if (cacheRes.ok) {
         const cached = await cacheRes.json();
@@ -73,7 +73,6 @@ const api = {
         }
       }
 
-      // 1. Try DeepL first (via our backend)
       const res = await fetch(`/api/translate?text=${encodeURIComponent(word)}`);
       if (res.ok) {
         const data = await res.json();
@@ -85,7 +84,6 @@ const api = {
         return translation;
       }
       
-      // 2. Fallback to MyMemory
       const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|vi`);
       const transData = await transRes.json();
       const translation = transData.responseData.translatedText;
@@ -135,7 +133,6 @@ const api = {
 // Helper Functions
 const helpers = {
   cleanWord(word) {
-    // Keep letters, hyphens, and parentheses for context
     return word.replace(/[^a-zA-Z-()\s]/g, '').trim();
   },
   async isValidEnglishWord(word) {
@@ -172,30 +169,40 @@ const templates = {
         </div>
         <div class="stat-card">
           <div class="stat-value">${Math.round((state.cards.filter(c => c.learned).length / (state.cards.length || 1)) * 100)}%</div>
-          <div class="stat-label">Progress</div>
+          <div class="stat-label">Overall Progress</div>
         </div>
       </div>
-      <div style="text-align: center;">
-        <button id="start-study" class="btn-primary" style="font-size: 1.25rem;">Start Studying Now</button>
+      <div style="display: flex; gap: 1.5rem; justify-content: center;">
+        <button id="start-learning" class="btn-primary" style="font-size: 1.25rem; padding: 1rem 2rem;">
+          🚀 Start Learning New Words (${state.cards.filter(c => !c.learned).length})
+        </button>
+        <button id="start-reviewing" class="btn-outline" style="font-size: 1.25rem; padding: 1rem 2rem; border-color: var(--success); color: var(--success);">
+          🔄 Review Mastered Words (${state.cards.filter(c => c.learned).length})
+        </button>
       </div>
     </div>
   `,
   study: () => {
-    const studyCards = state.cards.filter(c => !c.learned);
+    const studyCards = state.sessionType === 'learning' 
+      ? state.cards.filter(c => !c.learned)
+      : state.cards.filter(c => c.learned);
 
     if (state.isLoading) return `<div class="view" style="text-align: center;"><h3>Loading data...</h3></div>`;
     
     if (studyCards.length === 0) {
       return `
         <div class="view" style="text-align: center; padding: 4rem 2rem;">
-          <h2 style="color: var(--primary); font-size: 3rem; margin-bottom: 1rem;">🎉 Excellent!</h2>
-          <p style="color: var(--text-secondary); font-size: 1.25rem;">You have mastered all your cards! Add more in the Library to continue learning.</p>
+          <h2 style="color: var(--primary); font-size: 3rem; margin-bottom: 1rem;">🎉 All Done!</h2>
+          <p style="color: var(--text-secondary); font-size: 1.25rem;">
+            ${state.sessionType === 'learning' 
+              ? 'You have learned all your new words. Great job!' 
+              : 'You have reviewed all your mastered words. Keep it up!'}
+          </p>
           <button onclick="render('home')" class="btn-primary" style="margin-top: 2rem;">Back to Home</button>
         </div>
       `;
     }
 
-    // Adjust index if out of bounds (e.g. after marking last card as learned)
     if (state.currentCardIndex >= studyCards.length) {
       state.currentCardIndex = 0;
     }
@@ -206,13 +213,17 @@ const templates = {
     return `
       <div class="view study-container">
         <div style="width: 100%; max-width: 500px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-          <div class="progress-container" style="flex: 1; margin-right: 1rem;">
-            <div class="progress-bar" style="width: ${progress}%"></div>
+          <div style="font-weight: 600; color: var(--primary);">
+            ${state.sessionType === 'learning' ? '🚀 Learning Mode' : '🔄 Review Mode'}
           </div>
           <select id="mode-selector" class="form-input" style="width: auto; padding: 0.25rem 0.5rem;">
             <option value="flip" ${state.studyMode === 'flip' ? 'selected' : ''}>Flip Mode</option>
             <option value="type" ${state.studyMode === 'type' ? 'selected' : ''}>Type Mode</option>
           </select>
+        </div>
+
+        <div class="progress-container" style="width: 100%; max-width: 500px; margin-bottom: 1rem;">
+          <div class="progress-bar" style="width: ${progress}%"></div>
         </div>
         
         <p style="color: var(--text-secondary)">Card ${state.currentCardIndex + 1} / ${studyCards.length}</p>
@@ -309,9 +320,6 @@ const templates = {
   bulkAdd: () => `
     <div class="view">
       <h2 style="margin-bottom: 1.5rem; text-align: center;">Bulk Import & Auto-translate</h2>
-      <p style="color: var(--text-secondary); margin-bottom: 1rem; text-align: center;">
-        Only valid English words will be imported. Duplicates will be skipped.
-      </p>
       <div class="add-card-form">
         <textarea id="bulk-input" class="form-input" rows="10" placeholder="e.g. 
 apple
@@ -340,13 +348,27 @@ const render = (viewName) => {
 };
 
 const attachEventListeners = () => {
-  const startBtn = document.getElementById('start-study');
-  if (startBtn) startBtn.addEventListener('click', () => {
-    state.currentCardIndex = 0;
-    state.feedback = '';
-    state.userInput = '';
-    render('study');
-  });
+  const startLearningBtn = document.getElementById('start-learning');
+  if (startLearningBtn) {
+    startLearningBtn.addEventListener('click', () => {
+      state.sessionType = 'learning';
+      state.currentCardIndex = 0;
+      state.feedback = '';
+      state.userInput = '';
+      render('study');
+    });
+  }
+
+  const startReviewingBtn = document.getElementById('start-reviewing');
+  if (startReviewingBtn) {
+    startReviewingBtn.addEventListener('click', () => {
+      state.sessionType = 'reviewing';
+      state.currentCardIndex = 0;
+      state.feedback = '';
+      state.userInput = '';
+      render('study');
+    });
+  }
 
   const modeSelector = document.getElementById('mode-selector');
   if (modeSelector) {
@@ -370,13 +392,16 @@ const attachEventListeners = () => {
     answerInput.focus();
     answerInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
-        const card = state.cards[state.currentCardIndex];
+        const studyCards = state.sessionType === 'learning' 
+          ? state.cards.filter(c => !c.learned)
+          : state.cards.filter(c => c.learned);
+        
+        const card = studyCards[state.currentCardIndex];
         const isCorrect = helpers.checkAnswer(answerInput.value, card.term);
         state.userInput = answerInput.value;
         state.feedback = isCorrect ? 'correct' : 'incorrect';
         render('study');
         
-        // Auto next on correct after delay
         if (isCorrect) {
           setTimeout(() => {
             if (state.activeView === 'study' && state.feedback === 'correct') {
@@ -391,9 +416,13 @@ const attachEventListeners = () => {
   const nextBtn = document.getElementById('next-card');
   if (nextBtn) {
     nextBtn.addEventListener('click', () => {
+      const studyCards = state.sessionType === 'learning' 
+        ? state.cards.filter(c => !c.learned)
+        : state.cards.filter(c => c.learned);
+
       state.feedback = '';
       state.userInput = '';
-      if (state.currentCardIndex < state.cards.length - 1) {
+      if (state.currentCardIndex < studyCards.length - 1) {
         state.currentCardIndex++;
         render('study');
       } else {
@@ -418,7 +447,10 @@ const attachEventListeners = () => {
   const markBtn = document.getElementById('mark-learned');
   if (markBtn) {
     markBtn.addEventListener('click', () => {
-      api.toggleLearned(state.cards[state.currentCardIndex]);
+      const studyCards = state.sessionType === 'learning' 
+        ? state.cards.filter(c => !c.learned)
+        : state.cards.filter(c => c.learned);
+      api.toggleLearned(studyCards[state.currentCardIndex]);
     });
   }
 
@@ -428,14 +460,12 @@ const attachEventListeners = () => {
   const showBulkBtn = document.getElementById('show-bulk-add');
   if (showBulkBtn) showBulkBtn.addEventListener('click', () => render('bulkAdd'));
 
-  // Auto-fill on Blur
   const termInput = document.getElementById('term-input');
   if (termInput) {
     termInput.addEventListener('blur', async () => {
       const rawWord = termInput.value;
       const cleaned = helpers.cleanWord(rawWord);
       termInput.value = cleaned; 
-
       if (cleaned && await helpers.isValidEnglishWord(cleaned)) {
         const defInput = document.getElementById('def-input');
         if (!defInput.value || defInput.value === 'Meaning will appear here...') {
@@ -463,25 +493,19 @@ const attachEventListeners = () => {
     document.getElementById('cancel-add').addEventListener('click', () => render('library'));
   }
 
-  // Bulk Process
   const processBulkBtn = document.getElementById('process-bulk');
   if (processBulkBtn) {
     processBulkBtn.addEventListener('click', async () => {
       const input = document.getElementById('bulk-input').value;
       const rawWords = input.split(/[\n,]+/).map(w => w.trim()).filter(w => w);
-      
       if (rawWords.length === 0) return alert('Please enter some words.');
-      
       processBulkBtn.disabled = true;
       const status = document.getElementById('bulk-status');
       let successCount = 0;
-      
       for (let i = 0; i < rawWords.length; i++) {
         const cleaned = helpers.cleanWord(rawWords[i]);
         if (!cleaned) continue;
-
         status.innerText = `Validating (${i + 1}/${rawWords.length}): ${cleaned}...`;
-        
         if (await helpers.isValidEnglishWord(cleaned)) {
           const translation = await api.autoFill(cleaned, true);
           if (translation) {
@@ -491,7 +515,6 @@ const attachEventListeners = () => {
         }
         await new Promise(r => setTimeout(r, 400));
       }
-      
       alert(`Imported ${successCount} words!`);
       render('library');
     });
@@ -505,11 +528,9 @@ window.deleteCardHandler = (id) => {
   }
 };
 
-// Nav Click Handlers
 document.getElementById('nav-home').addEventListener('click', () => render('home'));
 document.getElementById('nav-study').addEventListener('click', () => render('home'));
 document.getElementById('nav-library').addEventListener('click', () => render('library'));
 
-// Initial Load
 api.fetchCards();
 render('home');
