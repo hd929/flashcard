@@ -204,8 +204,8 @@ const templates = {
 
         <div class="controls">
           <button id="prev-card" class="btn-outline" ${state.currentCardIndex === 0 ? 'disabled' : ''}>Previous</button>
-          <button id="mark-learned" class="btn-outline" style="border-color: var(--success); color: var(--success)">
-            ${card.learned ? 'Mastered' : 'Not Mastered'}
+          <button id="mark-learned" class="btn-outline" style="${card.learned ? 'background: var(--success); color: white; border-color: var(--success);' : 'color: var(--text-secondary);'}">
+            ${card.learned ? 'Mastered ✓' : 'Mark as Mastered'}
           </button>
           <button id="next-card" class="btn-primary">
             ${state.currentCardIndex === state.cards.length - 1 ? 'Finish' : 'Next'}
