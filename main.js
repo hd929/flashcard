@@ -34,7 +34,11 @@ const api = {
       });
       if (!res.ok) throw new Error('Failed to add card.');
       const newCard = await res.json();
-      state.cards.unshift(newCard);
+      // Check if card with this ID already exists in local state
+      const exists = state.cards.some(c => (c._id || c.id) === (newCard._id || newCard.id));
+      if (!exists) {
+        state.cards.unshift(newCard);
+      }
       if (!silent) render('library');
       return newCard;
     } catch (err) {

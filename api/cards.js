@@ -17,8 +17,18 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const { term, definition } = req.body;
+      
+      // Check for duplicates (case-insensitive)
+      const existingCard = await collection.findOne({ 
+        term: { $regex: new RegExp(`^${term.trim()}$`, 'i') } 
+      });
+
+      if (existingCard) {
+        return res.status(200).json(existingCard);
+      }
+
       const newCard = { 
-        term, 
+        term: term.trim(), 
         definition, 
         learned: false, 
         created_at: new Date() 
