@@ -60,6 +60,17 @@ const api = {
     }
 
     try {
+      // Try DeepL first (via our backend)
+      const res = await fetch(`/api/translate?text=${encodeURIComponent(word)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const translation = data.translatedText;
+        const defInput = document.getElementById('def-input');
+        if (defInput) defInput.value = translation;
+        return translation;
+      }
+      
+      // Fallback to MyMemory if DeepL is not configured or fails
       const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|vi`);
       const transData = await transRes.json();
       const translation = transData.responseData.translatedText;
