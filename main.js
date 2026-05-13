@@ -34,11 +34,12 @@ const api = {
       });
       if (!res.ok) throw new Error('Failed to add card.');
       const newCard = await res.json();
-      // Check if card with this ID already exists in local state
+      
       const exists = state.cards.some(c => (c._id || c.id) === (newCard._id || newCard.id));
       if (!exists) {
         state.cards.unshift(newCard);
       }
+      
       if (!silent) render('library');
       return newCard;
     } catch (err) {
@@ -65,7 +66,6 @@ const api = {
       return translation;
     } catch (err) {
       console.error('Auto-fill error:', err);
-      if (!silent) alert('Could not find translation for: ' + word);
       return null;
     } finally {
       if (btn) {
@@ -97,6 +97,23 @@ const api = {
       render('library');
     } catch (err) {
       console.error('Delete error:', err);
+    }
+  }
+};
+
+// Helper Functions
+const helpers = {
+  cleanWord(word) {
+    // Keep only letters and hyphens
+    return word.replace(/[^a-zA-Z-]/g, '').trim();
+  },
+  async isValidEnglishWord(word) {
+    if (!word || word.length < 2) return false;
+    try {
+      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+      return res.ok;
+    } catch (e) {
+      return false;
     }
   }
 };
@@ -219,7 +236,7 @@ const templates = {
     <div class="view">
       <h2 style="margin-bottom: 1.5rem; text-align: center;">Bulk Import & Auto-translate</h2>
       <p style="color: var(--text-secondary); margin-bottom: 1rem; text-align: center;">
-        Enter multiple English words (one per line or separated by commas).
+        Only valid English words will be imported. Duplicates will be skipped.
       </p>
       <div class="add-card-form">
         <textarea id="bulk-input" class="form-input" rows="10" placeholder="e.g. 
@@ -298,19 +315,26 @@ const attachEventListeners = () => {
   // Auto-fill on Blur
   const termInput = document.getElementById('term-input');
   if (termInput) {
-    termInput.addEventListener('blur', () => {
-      const word = termInput.value;
-      const defInput = document.getElementById('def-input');
-      if (word && (!defInput.value || defInput.value === 'Meaning will appear here...')) {
-        api.autoFill(word, true);
+    termInput.addEventListener('blur', async () => {
+      const rawWord = termInput.value;
+      const cleaned = helpers.cleanWord(rawWord);
+      termInput.value = cleaned; // Auto-correct UI
+
+      if (cleaned && await helpers.isValidEnglishWord(cleaned)) {
+        const defInput = document.getElementById('def-input');
+        if (!defInput.value || defInput.value === 'Meaning will appear here...') {
+          api.autoFill(cleaned, true);
+        }
       }
     });
   }
 
   const autoFillBtn = document.getElementById('auto-fill-btn');
   if (autoFillBtn) {
-    autoFillBtn.addEventListener('click', () => {
-      api.autoFill(document.getElementById('term-input').value);
+    autoFillBtn.addEventListener('click', async () => {
+      const cleaned = helpers.cleanWord(document.getElementById('term-input').value);
+      document.getElementById('term-input').value = cleaned;
+      api.autoFill(cleaned);
     });
   }
 
@@ -328,33 +352,34 @@ const attachEventListeners = () => {
   if (processBulkBtn) {
     processBulkBtn.addEventListener('click', async () => {
       const input = document.getElementById('bulk-input').value;
-      const words = input.split(/[\n,]+/).map(w => w.trim()).filter(w => w);
+      const rawWords = input.split(/[\n,]+/).map(w => w.trim()).filter(w => w);
       
-      if (words.length === 0) return alert('Please enter some words.');
+      if (rawWords.length === 0) return alert('Please enter some words.');
       
       processBulkBtn.disabled = true;
       const status = document.getElementById('bulk-status');
+      let successCount = 0;
       
-      for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-        status.innerText = `Processing (${i + 1}/${words.length}): ${word}...`;
+      for (let i = 0; i < rawWords.length; i++) {
+        const cleaned = helpers.cleanWord(rawWords[i]);
+        if (!cleaned) continue;
+
+        status.innerText = `Validating & Translating (${i + 1}/${rawWords.length}): ${cleaned}...`;
         
-        // Use a small helper to fetch translation without affecting UI inputs
-        try {
-          const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|vi`);
-          const transData = await transRes.json();
-          const translation = transData.responseData.translatedText;
-          
-          await api.addCard(word, translation, true);
-        } catch (e) {
-          console.error('Bulk error for:', word);
+        // 1. Validate if it's a real English word
+        if (await helpers.isValidEnglishWord(cleaned)) {
+          // 2. Auto-translate
+          const translation = await api.autoFill(cleaned, true);
+          if (translation) {
+            await api.addCard(cleaned, translation, true);
+            successCount++;
+          }
         }
         
-        // Small delay to avoid API rate limits
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 400)); // Rate limit protection
       }
       
-      alert(`Imported ${words.length} words successfully!`);
+      alert(`Imported ${successCount} valid English words successfully!`);
       render('library');
     });
     document.getElementById('cancel-add-bulk').addEventListener('click', () => render('library'));
