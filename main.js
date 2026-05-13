@@ -15,6 +15,7 @@ const api = {
     render(state.activeView);
     try {
       const res = await fetch('/api/cards');
+      if (!res.ok) throw new Error('API not responding. Run with "vercel dev"');
       state.cards = await res.json();
     } catch (err) {
       console.error('Fetch error:', err);
@@ -24,18 +25,49 @@ const api = {
     }
   },
 
-  async addCard(term, definition) {
+  async addCard(term, definition, silent = false) {
     try {
       const res = await fetch('/api/cards', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ term, definition, learned: false })
       });
+      if (!res.ok) throw new Error('Failed to add card.');
       const newCard = await res.json();
-      state.cards.push(newCard);
-      render('library');
+      state.cards.unshift(newCard);
+      if (!silent) render('library');
+      return newCard;
     } catch (err) {
       console.error('Add error:', err);
+      if (!silent) alert('Error: ' + err.message);
+    }
+  },
+
+  async autoFill(word, silent = false) {
+    if (!word) return;
+    const btn = document.getElementById('auto-fill-btn');
+    if (btn) {
+      btn.innerText = '...';
+      btn.disabled = true;
+    }
+
+    try {
+      const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|vi`);
+      const transData = await transRes.json();
+      const translation = transData.responseData.translatedText;
+      
+      const defInput = document.getElementById('def-input');
+      if (defInput) defInput.value = translation;
+      return translation;
+    } catch (err) {
+      console.error('Auto-fill error:', err);
+      if (!silent) alert('Could not find translation for: ' + word);
+      return null;
+    } finally {
+      if (btn) {
+        btn.innerText = 'Auto-fill';
+        btn.disabled = false;
+      }
     }
   },
 
@@ -73,29 +105,29 @@ const navBtns = document.querySelectorAll('.nav-btn');
 const templates = {
   home: () => `
     <div class="view">
-      <h1 style="margin-bottom: 2rem; text-align: center;">Chào mừng bạn trở lại!</h1>
+      <h1 style="margin-bottom: 2rem; text-align: center;">Welcome back, Learner!</h1>
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-value">${state.cards.length}</div>
-          <div class="stat-label">Tổng số thẻ</div>
+          <div class="stat-label">Total Cards</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">${state.cards.filter(c => c.learned).length}</div>
-          <div class="stat-label">Đã thuộc</div>
+          <div class="stat-label">Mastered</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">${Math.round((state.cards.filter(c => c.learned).length / (state.cards.length || 1)) * 100)}%</div>
-          <div class="stat-label">Tiến độ</div>
+          <div class="stat-label">Progress</div>
         </div>
       </div>
       <div style="text-align: center;">
-        <button id="start-study" class="btn-primary" style="font-size: 1.25rem;">Bắt đầu học ngay</button>
+        <button id="start-study" class="btn-primary" style="font-size: 1.25rem;">Start Studying Now</button>
       </div>
     </div>
   `,
   study: () => {
-    if (state.isLoading) return `<div class="view" style="text-align: center;"><h3>Đang tải dữ liệu...</h3></div>`;
-    if (state.cards.length === 0) return `<div class="view" style="text-align: center;"><h3>Không có thẻ nào để học! Hãy thêm thẻ mới trong Thư viện.</h3></div>`;
+    if (state.isLoading) return `<div class="view" style="text-align: center;"><h3>Loading data...</h3></div>`;
+    if (state.cards.length === 0) return `<div class="view" style="text-align: center;"><h3>No cards to study! Add some in the Library.</h3></div>`;
     
     const card = state.cards[state.currentCardIndex];
     const progress = ((state.currentCardIndex + 1) / state.cards.length) * 100;
@@ -105,28 +137,28 @@ const templates = {
         <div class="progress-container">
           <div class="progress-bar" style="width: ${progress}%"></div>
         </div>
-        <p style="color: var(--text-secondary)">Thẻ ${state.currentCardIndex + 1} / ${state.cards.length}</p>
+        <p style="color: var(--text-secondary)">Card ${state.currentCardIndex + 1} / ${state.cards.length}</p>
         
         <div class="card-scene" id="flashcard">
           <div class="card">
             <div class="card-face front">
               <div class="card-term">${card.term}</div>
-              <div class="card-hint">Nhấn để lật thẻ</div>
+              <div class="card-hint">Click to flip</div>
             </div>
             <div class="card-face back">
               <div class="card-definition">${card.definition}</div>
-              <div class="card-hint">Nhấn để lật lại</div>
+              <div class="card-hint">Click to flip back</div>
             </div>
           </div>
         </div>
 
         <div class="controls">
-          <button id="prev-card" class="btn-outline" ${state.currentCardIndex === 0 ? 'disabled' : ''}>Trước đó</button>
+          <button id="prev-card" class="btn-outline" ${state.currentCardIndex === 0 ? 'disabled' : ''}>Previous</button>
           <button id="mark-learned" class="btn-outline" style="border-color: var(--success); color: var(--success)">
-            ${card.learned ? 'Đã thuộc' : 'Chưa thuộc'}
+            ${card.learned ? 'Mastered' : 'Not Mastered'}
           </button>
           <button id="next-card" class="btn-primary">
-            ${state.currentCardIndex === state.cards.length - 1 ? 'Hoàn thành' : 'Tiếp theo'}
+            ${state.currentCardIndex === state.cards.length - 1 ? 'Finish' : 'Next'}
           </button>
         </div>
       </div>
@@ -135,12 +167,15 @@ const templates = {
   library: () => `
     <div class="view">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-        <h2>Thư viện của bạn</h2>
-        <button id="show-add-modal" class="btn-primary">+ Thêm thẻ mới</button>
+        <h2>Your Library</h2>
+        <div style="display: flex; gap: 0.5rem;">
+          <button id="show-bulk-add" class="btn-outline">Bulk Import</button>
+          <button id="show-add-modal" class="btn-primary">+ Add New Card</button>
+        </div>
       </div>
       
       <div class="card-grid">
-        ${state.isLoading ? '<p>Đang tải...</p>' : state.cards.map(card => `
+        ${state.isLoading ? '<p>Loading...</p>' : state.cards.map(card => `
           <div class="library-card">
             <div class="library-card-info">
               <h3>${card.term}</h3>
@@ -156,21 +191,43 @@ const templates = {
   `,
   addForm: () => `
     <div class="view">
-      <h2 style="margin-bottom: 1.5rem; text-align: center;">Thêm thẻ Flashcard mới</h2>
+      <h2 style="margin-bottom: 1.5rem; text-align: center;">Add New Flashcard</h2>
       <form class="add-card-form" id="new-card-form">
         <div class="form-group">
-          <label>Từ vựng (Tiếng Anh)</label>
-          <input type="text" id="term-input" class="form-input" placeholder="Ví dụ: Serendipity" required>
+          <label>Vocabulary (English)</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <input type="text" id="term-input" class="form-input" placeholder="e.g. Serendipity" required>
+            <button type="button" id="auto-fill-btn" class="btn-outline" style="padding: 0 1rem; white-space: nowrap;">Auto-fill</button>
+          </div>
         </div>
         <div class="form-group">
-          <label>Nghĩa (Tiếng Việt)</label>
-          <textarea id="def-input" class="form-input" rows="3" placeholder="Ví dụ: Sự tình cờ may mắn" required></textarea>
+          <label>Meaning (Vietnamese)</label>
+          <textarea id="def-input" class="form-input" rows="3" placeholder="Meaning will appear here..." required></textarea>
         </div>
         <div style="display: flex; gap: 1rem; justify-content: flex-end;">
-          <button type="button" id="cancel-add" class="btn-outline">Hủy</button>
-          <button type="submit" class="btn-primary">Lưu thẻ</button>
+          <button type="button" id="cancel-add" class="btn-outline">Cancel</button>
+          <button type="submit" class="btn-primary">Save Card</button>
         </div>
       </form>
+    </div>
+  `,
+  bulkAdd: () => `
+    <div class="view">
+      <h2 style="margin-bottom: 1.5rem; text-align: center;">Bulk Import & Auto-translate</h2>
+      <p style="color: var(--text-secondary); margin-bottom: 1rem; text-align: center;">
+        Enter multiple English words (one per line or separated by commas).
+      </p>
+      <div class="add-card-form">
+        <textarea id="bulk-input" class="form-input" rows="10" placeholder="e.g. 
+apple
+banana
+orange"></textarea>
+        <div id="bulk-status" style="margin-top: 1rem; font-size: 0.9rem; color: var(--primary);"></div>
+        <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1rem;">
+          <button type="button" id="cancel-add-bulk" class="btn-outline">Cancel</button>
+          <button id="process-bulk" class="btn-primary">Start Importing</button>
+        </div>
+      </div>
     </div>
   `
 };
@@ -180,9 +237,8 @@ const render = (viewName) => {
   state.activeView = viewName;
   mainContent.innerHTML = templates[viewName]();
   
-  // Update Nav
   navBtns.forEach(btn => {
-    btn.classList.toggle('active', btn.id === `nav-${viewName === 'addForm' ? 'library' : viewName}`);
+    btn.classList.toggle('active', btn.id === `nav-${['addForm', 'bulkAdd'].includes(viewName) ? 'library' : viewName}`);
   });
 
   attachEventListeners();
@@ -232,21 +288,77 @@ const attachEventListeners = () => {
   const showAddBtn = document.getElementById('show-add-modal');
   if (showAddBtn) showAddBtn.addEventListener('click', () => render('addForm'));
 
+  const showBulkBtn = document.getElementById('show-bulk-add');
+  if (showBulkBtn) showBulkBtn.addEventListener('click', () => render('bulkAdd'));
+
+  // Auto-fill on Blur
+  const termInput = document.getElementById('term-input');
+  if (termInput) {
+    termInput.addEventListener('blur', () => {
+      const word = termInput.value;
+      const defInput = document.getElementById('def-input');
+      if (word && (!defInput.value || defInput.value === 'Meaning will appear here...')) {
+        api.autoFill(word, true);
+      }
+    });
+  }
+
+  const autoFillBtn = document.getElementById('auto-fill-btn');
+  if (autoFillBtn) {
+    autoFillBtn.addEventListener('click', () => {
+      api.autoFill(document.getElementById('term-input').value);
+    });
+  }
+
   const form = document.getElementById('new-card-form');
   if (form) {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      const term = document.getElementById('term-input').value;
-      const definition = document.getElementById('def-input').value;
-      api.addCard(term, definition);
+      api.addCard(document.getElementById('term-input').value, document.getElementById('def-input').value);
     });
-
     document.getElementById('cancel-add').addEventListener('click', () => render('library'));
+  }
+
+  // Bulk Process
+  const processBulkBtn = document.getElementById('process-bulk');
+  if (processBulkBtn) {
+    processBulkBtn.addEventListener('click', async () => {
+      const input = document.getElementById('bulk-input').value;
+      const words = input.split(/[\n,]+/).map(w => w.trim()).filter(w => w);
+      
+      if (words.length === 0) return alert('Please enter some words.');
+      
+      processBulkBtn.disabled = true;
+      const status = document.getElementById('bulk-status');
+      
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        status.innerText = `Processing (${i + 1}/${words.length}): ${word}...`;
+        
+        // Use a small helper to fetch translation without affecting UI inputs
+        try {
+          const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|vi`);
+          const transData = await transRes.json();
+          const translation = transData.responseData.translatedText;
+          
+          await api.addCard(word, translation, true);
+        } catch (e) {
+          console.error('Bulk error for:', word);
+        }
+        
+        // Small delay to avoid API rate limits
+        await new Promise(r => setTimeout(r, 500));
+      }
+      
+      alert(`Imported ${words.length} words successfully!`);
+      render('library');
+    });
+    document.getElementById('cancel-add-bulk').addEventListener('click', () => render('library'));
   }
 };
 
 window.deleteCardHandler = (id) => {
-  if (confirm('Bạn có chắc muốn xóa thẻ này?')) {
+  if (confirm('Are you sure you want to delete this card?')) {
     api.deleteCard(id);
   }
 };

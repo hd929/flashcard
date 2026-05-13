@@ -6,16 +6,23 @@ const client = new MongoClient(uri);
 export default async function handler(req, res) {
   try {
     await client.connect();
-    const database = client.db('lexicard_db');
-    const collection = database.collection('cards');
+    // Use the default database from the connection string
+    const database = client.db();
+    const collection = database.collection('flashcards');
 
     if (req.method === 'GET') {
-      const cards = await collection.find({}).toArray();
+      const cards = await collection.find({}).sort({ created_at: -1 }).toArray();
       return res.status(200).json(cards);
     }
 
     if (req.method === 'POST') {
-      const newCard = req.body;
+      const { term, definition } = req.body;
+      const newCard = { 
+        term, 
+        definition, 
+        learned: false, 
+        created_at: new Date() 
+      };
       const result = await collection.insertOne(newCard);
       return res.status(201).json({ ...newCard, _id: result.insertedId });
     }
@@ -38,9 +45,7 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ message: 'Method not allowed' });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: 'Internal Server Error' });
-  } finally {
-    // We don't close the client in serverless to reuse connections
+    console.error('API Error:', error);
+    return res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 }
