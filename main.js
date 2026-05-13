@@ -60,23 +60,40 @@ const api = {
     }
 
     try {
-      // Try DeepL first (via our backend)
+      // 0. Check local/DB cache first
+      const cacheRes = await fetch(`/api/cards?term=${encodeURIComponent(word)}`);
+      if (cacheRes.ok) {
+        const cached = await cacheRes.json();
+        if (cached && cached.definition) {
+          const defInput = document.getElementById('def-input');
+          if (defInput && (!defInput.value || defInput.value === 'Meaning will appear here...')) {
+            defInput.value = cached.definition;
+          }
+          return cached.definition;
+        }
+      }
+
+      // 1. Try DeepL first (via our backend)
       const res = await fetch(`/api/translate?text=${encodeURIComponent(word)}`);
       if (res.ok) {
         const data = await res.json();
         const translation = data.translatedText;
         const defInput = document.getElementById('def-input');
-        if (defInput) defInput.value = translation;
+        if (defInput && (!defInput.value || defInput.value === 'Meaning will appear here...')) {
+          defInput.value = translation;
+        }
         return translation;
       }
       
-      // Fallback to MyMemory if DeepL is not configured or fails
+      // 2. Fallback to MyMemory
       const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|vi`);
       const transData = await transRes.json();
       const translation = transData.responseData.translatedText;
       
       const defInput = document.getElementById('def-input');
-      if (defInput) defInput.value = translation;
+      if (defInput && (!defInput.value || defInput.value === 'Meaning will appear here...')) {
+        defInput.value = translation;
+      }
       return translation;
     } catch (err) {
       console.error('Auto-fill error:', err);
@@ -118,12 +135,13 @@ const api = {
 // Helper Functions
 const helpers = {
   cleanWord(word) {
-    return word.replace(/[^a-zA-Z-]/g, '').trim();
+    // Keep letters, hyphens, and parentheses for context
+    return word.replace(/[^a-zA-Z-()\s]/g, '').trim();
   },
   async isValidEnglishWord(word) {
     if (!word || word.length < 2) return false;
     try {
-      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word.split('(')[0].trim()}`);
       return res.ok;
     } catch (e) {
       return false;

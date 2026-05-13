@@ -11,6 +11,16 @@ export default async function handler(req, res) {
     const collection = database.collection('flashcards');
 
     if (req.method === 'GET') {
+      const { term } = req.query;
+      
+      // If term is provided, it's a lookup for cache
+      if (term) {
+        const cached = await collection.findOne({ 
+          term: { $regex: new RegExp(`^${term.trim()}$`, 'i') } 
+        }, { sort: { created_at: -1 } });
+        return res.status(200).json(cached || { definition: null });
+      }
+
       const cards = await collection.find({}).sort({ created_at: -1 }).toArray();
       return res.status(200).json(cards);
     }
