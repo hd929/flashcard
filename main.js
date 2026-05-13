@@ -5,7 +5,10 @@ const state = {
   cards: [],
   currentCardIndex: 0,
   activeView: 'home',
-  isLoading: false
+  isLoading: false,
+  studyMode: 'flip', // 'flip' or 'type'
+  userInput: '',
+  feedback: '' // 'correct', 'incorrect', ''
 };
 
 // API Functions
@@ -104,7 +107,6 @@ const api = {
 // Helper Functions
 const helpers = {
   cleanWord(word) {
-    // Keep only letters and hyphens
     return word.replace(/[^a-zA-Z-]/g, '').trim();
   },
   async isValidEnglishWord(word) {
@@ -115,6 +117,9 @@ const helpers = {
     } catch (e) {
       return false;
     }
+  },
+  checkAnswer(input, answer) {
+    return input.trim().toLowerCase() === answer.trim().toLowerCase();
   }
 };
 
@@ -155,23 +160,47 @@ const templates = {
 
     return `
       <div class="view study-container">
-        <div class="progress-container">
-          <div class="progress-bar" style="width: ${progress}%"></div>
+        <div style="width: 100%; max-width: 500px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <div class="progress-container" style="flex: 1; margin-right: 1rem;">
+            <div class="progress-bar" style="width: ${progress}%"></div>
+          </div>
+          <select id="mode-selector" class="form-input" style="width: auto; padding: 0.25rem 0.5rem;">
+            <option value="flip" ${state.studyMode === 'flip' ? 'selected' : ''}>Flip Mode</option>
+            <option value="type" ${state.studyMode === 'type' ? 'selected' : ''}>Type Mode</option>
+          </select>
         </div>
+        
         <p style="color: var(--text-secondary)">Card ${state.currentCardIndex + 1} / ${state.cards.length}</p>
         
-        <div class="card-scene" id="flashcard">
-          <div class="card">
-            <div class="card-face front">
-              <div class="card-term">${card.term}</div>
-              <div class="card-hint">Click to flip</div>
-            </div>
-            <div class="card-face back">
-              <div class="card-definition">${card.definition}</div>
-              <div class="card-hint">Click to flip back</div>
+        ${state.studyMode === 'flip' ? `
+          <div class="card-scene" id="flashcard">
+            <div class="card">
+              <div class="card-face front">
+                <div class="card-term">${card.term}</div>
+                <div class="card-hint">Click to flip</div>
+              </div>
+              <div class="card-face back">
+                <div class="card-definition">${card.definition}</div>
+                <div class="card-hint">Click to flip back</div>
+              </div>
             </div>
           </div>
-        </div>
+        ` : `
+          <div class="stat-card" style="width: 100%; max-width: 500px; min-height: 350px; display: flex; flex-direction: column; justify-content: center; gap: 2rem;">
+            <div class="card-definition" style="font-size: 2rem;">${card.definition}</div>
+            
+            <div style="position: relative;">
+              <input type="text" id="answer-input" class="form-input" 
+                     placeholder="Type English word..." 
+                     style="font-size: 1.5rem; text-align: center; ${state.feedback === 'correct' ? 'border-color: var(--success);' : state.feedback === 'incorrect' ? 'border-color: var(--danger);' : ''}" 
+                     value="${state.userInput}"
+                     ${state.feedback !== '' ? 'disabled' : ''}
+                     autocomplete="off">
+              ${state.feedback === 'incorrect' ? `<div style="color: var(--danger); margin-top: 1rem;">Correct answer: <strong>${card.term}</strong></div>` : ''}
+              ${state.feedback === 'correct' ? `<div style="color: var(--success); margin-top: 1rem;">Correct! Well done.</div>` : ''}
+            </div>
+          </div>
+        `}
 
         <div class="controls">
           <button id="prev-card" class="btn-outline" ${state.currentCardIndex === 0 ? 'disabled' : ''}>Previous</button>
@@ -267,7 +296,22 @@ const render = (viewName) => {
 
 const attachEventListeners = () => {
   const startBtn = document.getElementById('start-study');
-  if (startBtn) startBtn.addEventListener('click', () => render('study'));
+  if (startBtn) startBtn.addEventListener('click', () => {
+    state.currentCardIndex = 0;
+    state.feedback = '';
+    state.userInput = '';
+    render('study');
+  });
+
+  const modeSelector = document.getElementById('mode-selector');
+  if (modeSelector) {
+    modeSelector.addEventListener('change', (e) => {
+      state.studyMode = e.target.value;
+      state.feedback = '';
+      state.userInput = '';
+      render('study');
+    });
+  }
 
   const flashcard = document.getElementById('flashcard');
   if (flashcard) {
@@ -276,9 +320,34 @@ const attachEventListeners = () => {
     });
   }
 
+  const answerInput = document.getElementById('answer-input');
+  if (answerInput) {
+    answerInput.focus();
+    answerInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        const card = state.cards[state.currentCardIndex];
+        const isCorrect = helpers.checkAnswer(answerInput.value, card.term);
+        state.userInput = answerInput.value;
+        state.feedback = isCorrect ? 'correct' : 'incorrect';
+        render('study');
+        
+        // Auto next on correct after delay
+        if (isCorrect) {
+          setTimeout(() => {
+            if (state.activeView === 'study' && state.feedback === 'correct') {
+              document.getElementById('next-card')?.click();
+            }
+          }, 1500);
+        }
+      }
+    });
+  }
+
   const nextBtn = document.getElementById('next-card');
   if (nextBtn) {
     nextBtn.addEventListener('click', () => {
+      state.feedback = '';
+      state.userInput = '';
       if (state.currentCardIndex < state.cards.length - 1) {
         state.currentCardIndex++;
         render('study');
@@ -292,6 +361,8 @@ const attachEventListeners = () => {
   const prevBtn = document.getElementById('prev-card');
   if (prevBtn) {
     prevBtn.addEventListener('click', () => {
+      state.feedback = '';
+      state.userInput = '';
       if (state.currentCardIndex > 0) {
         state.currentCardIndex--;
         render('study');
@@ -318,7 +389,7 @@ const attachEventListeners = () => {
     termInput.addEventListener('blur', async () => {
       const rawWord = termInput.value;
       const cleaned = helpers.cleanWord(rawWord);
-      termInput.value = cleaned; // Auto-correct UI
+      termInput.value = cleaned; 
 
       if (cleaned && await helpers.isValidEnglishWord(cleaned)) {
         const defInput = document.getElementById('def-input');
@@ -364,22 +435,19 @@ const attachEventListeners = () => {
         const cleaned = helpers.cleanWord(rawWords[i]);
         if (!cleaned) continue;
 
-        status.innerText = `Validating & Translating (${i + 1}/${rawWords.length}): ${cleaned}...`;
+        status.innerText = `Validating (${i + 1}/${rawWords.length}): ${cleaned}...`;
         
-        // 1. Validate if it's a real English word
         if (await helpers.isValidEnglishWord(cleaned)) {
-          // 2. Auto-translate
           const translation = await api.autoFill(cleaned, true);
           if (translation) {
             await api.addCard(cleaned, translation, true);
             successCount++;
           }
         }
-        
-        await new Promise(r => setTimeout(r, 400)); // Rate limit protection
+        await new Promise(r => setTimeout(r, 400));
       }
       
-      alert(`Imported ${successCount} valid English words successfully!`);
+      alert(`Imported ${successCount} words!`);
       render('library');
     });
     document.getElementById('cancel-add-bulk').addEventListener('click', () => render('library'));
@@ -387,14 +455,14 @@ const attachEventListeners = () => {
 };
 
 window.deleteCardHandler = (id) => {
-  if (confirm('Are you sure you want to delete this card?')) {
+  if (confirm('Are you sure?')) {
     api.deleteCard(id);
   }
 };
 
 // Nav Click Handlers
 document.getElementById('nav-home').addEventListener('click', () => render('home'));
-document.getElementById('nav-study').addEventListener('click', () => render('study'));
+document.getElementById('nav-study').addEventListener('click', () => render('home'));
 document.getElementById('nav-library').addEventListener('click', () => render('library'));
 
 // Initial Load
