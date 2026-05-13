@@ -181,11 +181,27 @@ const templates = {
     </div>
   `,
   study: () => {
+    const studyCards = state.cards.filter(c => !c.learned);
+
     if (state.isLoading) return `<div class="view" style="text-align: center;"><h3>Loading data...</h3></div>`;
-    if (state.cards.length === 0) return `<div class="view" style="text-align: center;"><h3>No cards to study! Add some in the Library.</h3></div>`;
     
-    const card = state.cards[state.currentCardIndex];
-    const progress = ((state.currentCardIndex + 1) / state.cards.length) * 100;
+    if (studyCards.length === 0) {
+      return `
+        <div class="view" style="text-align: center; padding: 4rem 2rem;">
+          <h2 style="color: var(--primary); font-size: 3rem; margin-bottom: 1rem;">🎉 Excellent!</h2>
+          <p style="color: var(--text-secondary); font-size: 1.25rem;">You have mastered all your cards! Add more in the Library to continue learning.</p>
+          <button onclick="render('home')" class="btn-primary" style="margin-top: 2rem;">Back to Home</button>
+        </div>
+      `;
+    }
+
+    // Adjust index if out of bounds (e.g. after marking last card as learned)
+    if (state.currentCardIndex >= studyCards.length) {
+      state.currentCardIndex = 0;
+    }
+    
+    const card = studyCards[state.currentCardIndex];
+    const progress = ((state.currentCardIndex + 1) / studyCards.length) * 100;
 
     return `
       <div class="view study-container">
@@ -199,7 +215,7 @@ const templates = {
           </select>
         </div>
         
-        <p style="color: var(--text-secondary)">Card ${state.currentCardIndex + 1} / ${state.cards.length}</p>
+        <p style="color: var(--text-secondary)">Card ${state.currentCardIndex + 1} / ${studyCards.length}</p>
         
         ${state.studyMode === 'flip' ? `
           <div class="card-scene" id="flashcard">
@@ -237,7 +253,7 @@ const templates = {
             ${card.learned ? 'Mastered ✓' : 'Mark as Mastered'}
           </button>
           <button id="next-card" class="btn-primary">
-            ${state.currentCardIndex === state.cards.length - 1 ? 'Finish' : 'Next'}
+            ${state.currentCardIndex === studyCards.length - 1 ? 'Finish' : 'Next'}
           </button>
         </div>
       </div>
